@@ -53,7 +53,6 @@ edx <- rbind(edx, removed)
 rm(dl, ratings, movies, test_index, temp, movielens, removed)
 
 save(edx, validation, file ="data.RData")
-load("data.RData")
 
 # Create a train and test sets
 
@@ -372,6 +371,7 @@ b_y_reg <- train_set %>%
   group_by(year_diff) %>%
   summarize(b_y_reg = sum(rating - b_i_reg - b_u_reg - b_g_reg - mu)/(n()+lambda4))
 
+
 # Predicted ratings with regularization of all effects
 
 predicted_ratings_reg <-  test_set %>% 
@@ -384,7 +384,8 @@ predicted_ratings_reg <-  test_set %>%
 
 identical(RMSE(test_set$rating, predicted_ratings_reg), rmse_b_iugy_reg)
 
-# Adjusting the predictions
+
+# Adjusting the predictions to lie between 0.5 and 5 (stars)
 
 predicted_ratings_reg_corr <- predicted_ratings_reg
 predicted_ratings_reg_corr[predicted_ratings_reg_corr > 5] <- 5
@@ -392,9 +393,14 @@ predicted_ratings_reg_corr[predicted_ratings_reg_corr < 0.5] <- 0.5
 
 rmse_b_iugy_reg_final <- RMSE(test_set$rating, predicted_ratings_reg_corr)
 
+
+# Adjusting predictions to have a step 0.5 increases RMSE
+
 predicted_ratings_reg_corr2 <- plyr::round_any(predicted_ratings_reg_corr, 0.5)
 
 RMSE(test_set$rating, predicted_ratings_reg_corr2)
+
+# Summarizing RMSEs
 
 results_reg <- tibble(method = c("Movie Effekt Reg", 
                              "Movie + User Effekt Reg", 
@@ -412,11 +418,16 @@ results_reg <- results_reg %>%
   
 results <- rbind(results, results_reg)
 
+
+# Improvement based only on regularization
+
 (1 - rmse_b_iugy_reg/rmse_b_iugy) * 100
 
 
 
-# Validation
+# Evaluation of the prediction model with the validation set
+
+# Adding year of movie, of rating and the difference between them
 
 validation <- validation %>%
   mutate(year_m = str_extract(title, "\\(\\d{4}\\)")) %>%
@@ -425,7 +436,7 @@ validation <- validation %>%
          year_r = year(as.POSIXct(timestamp, origin="1970-01-01")),
          year_diff = year_r - year_m)
 
-
+# Evaluation
 
 predicted_ratings_val <-  validation %>% 
   left_join(b_i_reg, by = "movieId") %>%
@@ -437,376 +448,16 @@ predicted_ratings_val <-  validation %>%
 
 RMSE(validation$rating, predicted_ratings_val)
 
+
+# Genres of 3 entries are not shared by the validation and train sets and have to be excluded
+
+
+
+
+
+
 predicted_ratings_val_corr <- predicted_ratings_val
 predicted_ratings_val_corr[predicted_ratings_val_corr > 5] <- 5
 predicted_ratings_val_corr[predicted_ratings_val_corr < 0.5] <- 0.5
 
 RMSE(validation$rating, predicted_ratings_val_corr)
-
-
-
-
-
-
-# Influence of the time
-
-
-
-l3 <- 4
-
-b_g <- train_set %>% 
-  left_join(b_i, by="movieId") %>%
-  left_join(b_u, by = "userId") %>%
-  group_by(genres) %>%
-  dplyr::summarize(b_g = sum(rating - b_i - b_u - mu)/(n()+l3))
-
-predicted_ratings_bg <- 
-  test_set %>% 
-  left_join(b_i, by = "movieId") %>%
-  left_join(b_u, by = "userId") %>%
-  left_join(b_g, by = "genres") %>%
-  mutate(pred = mu + b_i + b_u + b_g) %>%
-  pull(pred)
-
-
-predicted_ratings_bg_corr <- predicted_ratings_bg
-predicted_ratings_bg_corr[predicted_ratings_bg_corr > 5] <- 5
-predicted_ratings_bg_corr[predicted_ratings_bg_corr < 0.5] <- 0.5
-
-
-RMSE(test_set$rating, predicted_ratings_bg)
-RMSE(test_set$rating, predicted_ratings_bg_corr)
-
-
-# Matrix factorization
-# Creation of a smaller matrix for speed
-train_small <- train_set %>% 
-  group_by(movieId) %>%
-  filter(n() >= 500) %>% ungroup() %>% 
-  group_by(userId) %>%
-  filter(n() >= 500) %>% ungroup()
-
-y <- train_small %>% 
-  select(userId, movieId, rating) %>%
-  pivot_wider(names_from = "movieId", values_from = "rating") %>%
-  as.matrix()
-
-rownames(y)<- y[,1]
-y <- y[,-1]
-
-movie_titles <- edx %>% 
-  select(movieId, title) %>%
-  distinct()
-
-colnames(y) <- with(movie_titles, title[match(colnames(y), movieId)])
-
-y <- sweep(y, 2, colMeans(y, na.rm=TRUE))
-y <- sweep(y, 1, rowMeans(y, na.rm=TRUE))
-
-y2 <- as(y, "realRatingMatrix")
-
-svd_pred <- Recommender(data = y2, method = "SVD", parameter = list(k = 30))
-
-svd_pred
-
-sved_res <- predict(object = svd_pred, newdata = y2)
-sved_res@items[[1]]
-
-
-
-# Adding the year
-
-year <- str_extract(edx$title, "\\(\\d{4}\\)")
-year <- str_extract(year, "\\d{4}")
-year_r <- as.POSIXct(edx$timestamp, origin="1970-01-01")
-year_r <- year(year_r)
-edx_y <- edx %>%
-  mutate(year_m = as.numeric(year), year_r = year_r, year_diff = year_r - year_m)
-
-
-table(year_r)
-
-
-edx_y %>%
-  slice(1:10000) %>%
-  ggplot(aes(year_diff, rating)) +
-  geom_point() +
-  geom_smooth(method = "lm")
-
-lambdas4 <- seq(0, 1000, 100)
-
-train_set_y <- train_set %>%
-  mutate(year_m = str_extract(title, "\\(\\d{4}\\)")) %>%
-  mutate(year_m = as.numeric(str_extract(year_m, "\\d{4}")),
-         year_r = year(as.POSIXct(timestamp, origin="1970-01-01")),
-         year_diff = year_r - year_m)
-
-test_set_y <- test_set %>%
-  mutate(year_m = str_extract(title, "\\(\\d{4}\\)")) %>%
-  mutate(year_m = as.numeric(str_extract(year_m, "\\d{4}")),
-         year_r = year(as.POSIXct(timestamp, origin="1970-01-01")),
-         year_diff = year_r - year_m)
-
-
-
-
-
-predicted_ratings_by <- 
-  test_set_y %>% 
-  left_join(b_i, by = "movieId") %>%
-  left_join(b_u, by = "userId") %>%
-  left_join(b_g, by = "genres") %>%
-  left_join(b_y, by = "year_diff") %>%
-  mutate(pred = mu + b_i + b_u + b_g + b_y) %>%
-  pull(pred)
-
-
-predicted_ratings_by_corr <- predicted_ratings_by
-predicted_ratings_by_corr[predicted_ratings_by_corr > 5] <- 5
-predicted_ratings_by_corr[predicted_ratings_by_corr < 0.5] <- 0.5
-
-
-RMSE(test_set$rating, predicted_ratings_by)
-RMSE(test_set$rating, predicted_ratings_by_corr)
-
-
-
-# Recommender
-
-train_set_small_cut <- train_set %>%
-  select(userId, movieId, rating) %>%
-  group_by(userId) %>%
-  filter(n() >= 100) %>% ungroup() %>%
-  group_by(movieId) %>%
-  filter(n() >= 100) %>% ungroup()
-
-
-
-test_set_small_cut <- test_set %>%
-  select(userId, movieId, rating) %>%
-  group_by(userId) %>%
-  filter(n() >= 50) %>% ungroup() %>%
-  group_by(movieId) %>%
-  filter(n() >= 50) %>% ungroup()
-  
-
-test_m <- test_set_small_cut %>% 
-  pivot_wider(names_from = "movieId", values_from = "rating") %>%
-  as.matrix()
-
-rownames(test_m)<- test_m[,1]
-test_m <- test_m[,-1]
-
-movie_titles <- movielens %>% 
-  select(movieId, title) %>%
-  distinct()
-
-colnames(test_m) <- with(movie_titles, title[match(colnames(test_m), movieId)])
-
-
-train_m <- train_set_small_cut %>% 
-  pivot_wider(names_from = "movieId", values_from = "rating") %>%
-  as.matrix()
-
-rownames(train_m)<- train_m[,1]
-train_m <- test_m[,-1]
-
-movie_titles <- movielens %>% 
-  select(movieId, title) %>%
-  distinct()
-
-colnames(train_m) <- with(movie_titles, title[match(colnames(train_m), movieId)])
-
-
-test_set_small_cut <- as.data.table(test_set_small_cut)
-
-temp_test <- as(test_set_small_cut,"realRatingMatrix")
-
-test_rm <- as(test_m,"realRatingMatrix")
-train_rm <- as(train_m,"realRatingMatrix")
-
-test_rm
-
-mod_pop_1 <- Recommender(getData(eval_pop_train, "train"), method = "POPULAR", param = list(normalize = "center"))
-
-pred_pop_1 <- predict(mod_pop_1, getData(eval_pop_test, "known"), type = "ratings")
-
-rmse_pop_1 <- calcPredictionAccuracy(pred_pop_1, getData(eval_pop_test, "unknown"))[1]
-
-
-calcPredictionAccuracy(pred, test_rm)[1]
-
-eval_pop_test <- evaluationScheme(test_rm, method = "split", train = 0, given = -5)
-eval_pop_train <- eval_pop_1
-
-
-# POPULAR
-
-mod_pop <- Recommender(test_rm, method = "POPULAR", param = list(normalize = "center"))
-
-pred_pop <- predict(mod_pop, test_rm[1:6], type = "ratings")
-
-as(pred_pop, "matrix")[,1:10]
-
-set.seed(3)
-
-eval_pop <- evaluationScheme(test_rm, method = "split", train = 0.7, given = -5)
-
-mod_pop_new <- Recommender(getData(eval_pop, "train"), "POPULAR")
-
-pred_pop_new <- predict(mod_pop, getData(eval_pop, "known"), type = "ratings")
-
-rmse_pop <- calcPredictionAccuracy(pred_pop_new, getData(eval_pop, "unknown"))[1]
-
-# SVD
-
-mod_pop <- Recommender(test_rm, method = "SVD")
-
-pred_pop <- predict(mod_pop, test_rm[1:6], type = "ratings")
-
-as(pred_pop, "matrix")[,1:10]
-
-set.seed(3)
-
-eval <- evaluationScheme(test_rm, method = "split", train = 0.7, given = -5)
-
-mod_svd <- Recommender(getData(eval_svd, "train"), "SVD")
-
-pred_svd <- predict(mod_svd, getData(eval_svd, "known"), type = "ratings")
-
-rmse_svd <- calcPredictionAccuracy(pred_svd, getData(eval_svd, "unknown"))[1]
-
-
- 
-save(temp_test, temp_train, file ="rec_data.RData")
-load("rec_data.RData")
-
-save(rec, temp_test, file = "rec_data_2.RData")
-load("rec_data_2.RData")
-
-
-
-rec <- Recommender(test_rm, method = "SVD")
-pre <- predict(rec, test_rm, type = "ratingMatrix")
-
-calcPredictionAccuracy(pre, test_rm) 
-
-RMSE(temp_test@data@x, pre@data@x[1:length(temp_test@data@x)])
-
-head(pre@data@x)
-
-train_small <- train_set %>% 
-  group_by(movieId) %>%
-  filter(n() >= 500) %>% ungroup() %>% 
-  group_by(userId) %>%
-  filter(n() >= 500) %>% ungroup()
-
-y <- train_small %>% 
-  select(userId, movieId, rating) %>%
-  pivot_wider(names_from = "movieId", values_from = "rating") %>%
-  as.matrix()
-rownames(y)<- y[,1]
-y <- y[,-1]
-
-movie_titles <- edx %>% 
-  select(movieId, title) %>%
-  distinct()
-
-colnames(y) <- with(movie_titles, title[match(colnames(y), movieId)])
-
-
-z <- test_set %>% 
-  select(userId, movieId, rating) %>%
-  pivot_wider(names_from = "movieId", values_from = "rating") %>%
-  as.matrix()
-
-rownames(z)<- z[,1]
-z <- z[,-1]
-
-colnames(z) <- with(movie_titles, title[match(colnames(z), movieId)])
-
-rm(rec, temp_test)
-
-
-
-# Movielens for Recommenderlab
-
-movielens_small <- movielens %>% 
-  group_by(movieId) %>%
-  filter(n() >= 300) %>% ungroup() %>% 
-  group_by(userId) %>%
-  filter(n() >= 300) %>% ungroup()
-
-movielens_small_m <- movielens_small %>%
-  select(userId, movieId, rating) %>%
-  pivot_wider(names_from = "movieId", values_from = "rating") %>%
-  as.matrix()
-
-rownames(movielens_small_m)<- movielens_small_m[,1]
-movielens_small_m <- test_m[,-1]
-
-movie_titles <- movielens %>% 
-  select(movieId, title) %>%
-  distinct()
-
-colnames(movielens_small_m) <- with(movie_titles, title[match(colnames(movielens_small_m), movieId)])
-
-movielens_small_mr <- as(movielens_small_m,"realRatingMatrix")
-
-
-# POPULAR
-
-set.seed(3)
-
-eval_pop <- evaluationScheme(movielens_small_mr, method = "split", train = 0.9, given = -5)
-
-mod_pop_new <- Recommender(getData(eval_pop, "train"), "POPULAR")
-
-pred_pop_new <- predict(mod_pop_new, getData(eval_pop, "known"), type = "ratings")
-
-rmse_pop <- calcPredictionAccuracy(pred_pop_new, getData(eval_pop, "unknown"))[1]
-
-# edx for Recommenderlab
-
-edx_small <- edx %>% 
-  group_by(movieId) %>%
-  filter(n() >= 300) %>% ungroup() %>% 
-  group_by(userId) %>%
-  filter(n() >= 300) %>% ungroup()
-
-edx_small_m <- edx_small %>%
-  select(userId, movieId, rating) %>%
-  pivot_wider(names_from = "movieId", values_from = "rating") %>%
-  as.matrix()
-
-rownames(edx_small_m)<- edx_small_m[,1]
-edx_small_m <- test_m[,-1]
-
-movie_titles <- movielens %>% 
-  select(movieId, title) %>%
-  distinct()
-
-colnames(edx_small_m) <- with(movie_titles, title[match(colnames(edx_small_m), movieId)])
-
-edx_small_mr <- as(edx_small_m,"realRatingMatrix")
-
-
-# POPULAR
-
-set.seed(3)
-
-eval_pop_edx <- evaluationScheme(edx_small_mr, method = "split", train = 0.8, given = -5)
-
-mod_pop_edx <- Recommender(getData(eval_pop_edx, "train"), "POPULAR")
-
-pred_pop_edx <- predict(mod_pop_edx, getData(eval_pop_edx, "known"), type = "ratings")
-
-rmse_pop_edx <- calcPredictionAccuracy(pred_pop_edx, getData(eval_pop_edx, "unknown"))[1]
-
-test_pred_pop_edx <- as(pred_pop_edx, "matrix")
-test_pred_pop_edx[1:10, 1:10]
-
-test_pred_pop_edx_df <- gather(test_pred_pop_edx, "movieId", "rating") 
-
-
-colnames(test_pred_pop_edx) <- with(movie_titles, title[match(colnames(test_pred_pop_edx), movieId)])
