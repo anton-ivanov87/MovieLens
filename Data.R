@@ -3,12 +3,10 @@
 ##########################################################
 
 library(tidyverse)
-library(caret)
 library(data.table)
-library(recommenderlab)
+library(caret)
 library(stringr)
 library(lubridate)
-library(Matrix)
 
 # MovieLens 10M dataset:
 # https://grouplens.org/datasets/movielens/10m/
@@ -29,7 +27,6 @@ movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(movieId),
 
 movielens <- left_join(ratings, movies, by = "movieId")
 save(movielens, file = "movielens.RData")
-load(movielens.RData)
 
 # A small dataset for knitting
 movielens_s <- movielens[1:10,]
@@ -64,6 +61,7 @@ test_set <- test_set %>%
   semi_join(train_set, by = "movieId") %>%
   semi_join(train_set, by = "userId")
 
+rm(test_index)
 
 #######################################################################
 # Create the linear model
@@ -82,6 +80,7 @@ pred_random <- sample(seq(0.5, 5, by = 0.5), nrow(test_set), replace = TRUE)
 
 rmse_random <- RMSE(test_set$rating, pred_random)
 
+rm(pred_random)
 
 # Prediction based on the mean rating only
 
@@ -119,7 +118,7 @@ predicted_ratings_b_iu <- test_set %>%
   mutate(pred = mu + b_i + b_u) %>%
   pull(pred)
 
-rmse_b_iu <- RMSE(test_set$rating, predicted_ratings_b_u)
+rmse_b_iu <- RMSE(test_set$rating, predicted_ratings_b_iu)
 
 
 # Genre effekt
@@ -140,6 +139,7 @@ predicted_ratings_b_iug <-
 
 rmse_b_iug <- RMSE(test_set$rating, predicted_ratings_b_iug)
 
+rm(predicted_ratings_b_i, predicted_ratings_b_iu, predicted_ratings_b_iug)
 
 # Time effect
 
@@ -152,6 +152,7 @@ edx_y <- edx %>%
          year_r = year(as.POSIXct(timestamp, origin="1970-01-01")),
          year_diff = year_r - year_m)
 
+set.seed(4)
 edx_y[sample(nrow(edx_y), 100000),] %>%
   ggplot(aes(year_diff, rating)) +
   geom_point()
@@ -163,6 +164,8 @@ edx_y[sample(nrow(edx_y), 100000),] %>%
   ggplot(aes(year_diff, rating_mean)) +
   geom_point() +
   geom_smooth(method = "lm")
+
+rm(edx_y)
 
 # Adding year to the train and test sets (due to memory problems via mutate, not via join)
 
@@ -179,7 +182,6 @@ test_set <- test_set %>%
   mutate(year_m = as.numeric(year_m),
          year_r = year(as.POSIXct(timestamp, origin="1970-01-01")),
          year_diff = year_r - year_m)
-
 
 b_y <- train_set %>% 
   left_join(b_i, by="movieId") %>%
@@ -215,7 +217,9 @@ results <- tibble(method = c("Random",
 results <- results %>%
   mutate(improvement = (1 - RMSE/lag(RMSE))*100)
 
-results
+save(results, file = "results.RData")
+
+rm(b_i, b_u, b_g, b_y)
 
 ################
 # Regularization
@@ -242,11 +246,11 @@ rmses_b_i <- sapply(lambdas1, function(l){
 
 # The best lambda shown graphically and as a number
 
-data.frame(lambdas = lambdas1, rmses = rmses_bi) %>%
+data.frame(lambdas = lambdas1, rmses = rmses_b_i) %>%
   ggplot(aes(lambdas, rmses)) +
   geom_point()
 
-lambda1 <- lambdas1[which.min(rmses_bi)]
+lambda1 <- lambdas1[which.min(rmses_b_i)]
 
 rmse_b_i_reg <- min(rmses_b_i)
 
@@ -290,6 +294,7 @@ b_u_reg <- train_set %>%
   group_by(userId) %>%
   summarize(b_u_reg = sum(rating - b_i_reg - mu)/(n()+lambda2))
 
+save(b_i_reg, b_u_reg, lambda1, lambda2, rmse_b_i_reg, rmse_b_iu_reg, file = "reg_iu.RData")
 
 # Choosing the penalty term for b_g
 
