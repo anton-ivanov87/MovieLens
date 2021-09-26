@@ -14,18 +14,38 @@ knitr::opts_chunk$set(echo = TRUE)
 ## 1 Introduction
 
 In this project, we will be creating a movie recommendation system using the [10M version of the MovieLens dataset](https://grouplens.org/datasets/movielens/10m/).
-This is a small subset of a larger dataset containing 10 million ratings for 10,000 movies from 72,000 users.
+This dataset contains 10 million ratings for 10,000 movies from 72,000 users.
 
-Recommendation systems are of particular importance in the modern world. They allow companies such as online shops or streaming services to recommend users matching goods or content, providing higher profit.
+Recommendation systems are of particular importance in the modern world. They allow companies such as online shops or streaming services to recommend users matching goods or content, providing higher profit. 
 
 The goal of the project is to predict a rating for a specific movie from a specific user, based on the available ratings.
 The used recommendation system is as following: One star suggests it is not a good movie, whereas five stars suggests it is an excellent movie.
 
-```{r complete dataset, message=FALSE}
+The dataset contains 6 columns: user id, movie id, rating (0.5 - 5 stars), timestamp (as number of seconds after 1st January 1970), title of the movie and genre of the movie. These are the first 10 rows of the dataset.
+
+```{r small dataset, message=FALSE}
 library(tidyverse)
 load("movielens_s.RData")
 as_tibble(movielens_s)
 ```
+The data is randomly split into two subsets, whereas 10% of it are saved for the validation of the recommendation system and 90% are used for creation of the system.
 
-The data will be split into
-The dataset includes ratings for  movies from users.
+Code
+
+
+The resulting subset with 90% of data is also randomly split into the training set (80%) and test set (20%).
+
+Code
+
+## 2 Analysis and Methods
+
+
+
+
+## 3 Results
+
+
+
+
+
+## 4 Conclusion
