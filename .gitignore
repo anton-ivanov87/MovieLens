@@ -29,4 +29,6 @@ vignettes/*.pdf
 # big data files
 *.dat
 movielens.RData
+movielens_s.RData
+data.RData
 *.RData

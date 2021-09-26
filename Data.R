@@ -145,7 +145,7 @@ rm(predicted_ratings_b_i, predicted_ratings_b_iu, predicted_ratings_b_iug)
 
 # Adding year to edx
 
-edx_y <- edx %>%
+edx <- edx %>%
   mutate (year_m = str_extract(title, "\\(\\d{4}\\)")) %>%
   mutate(year_m = str_extract(year_m, "\\d{4}")) %>%
   mutate(year_m = as.numeric(year_m),
@@ -164,8 +164,6 @@ edx_y[sample(nrow(edx_y), 100000),] %>%
   ggplot(aes(year_diff, rating_mean)) +
   geom_point() +
   geom_smooth(method = "lm")
-
-rm(edx_y)
 
 # Adding year to the train and test sets (due to memory problems via mutate, not via join)
 
@@ -219,7 +217,7 @@ results <- results %>%
 
 save(results, file = "results.RData")
 
-rm(b_i, b_u, b_g, b_y)
+rm(b_i, b_u, b_g, b_y, predicted_ratings_b_iugy)
 
 ################
 # Regularization
@@ -294,11 +292,10 @@ b_u_reg <- train_set %>%
   group_by(userId) %>%
   summarize(b_u_reg = sum(rating - b_i_reg - mu)/(n()+lambda2))
 
-save(b_i_reg, b_u_reg, lambda1, lambda2, rmse_b_i_reg, rmse_b_iu_reg, file = "reg_iu.RData")
 
 # Choosing the penalty term for b_g
 
-lambdas3 <- seq(20, 30, 0.25)
+lambdas3 <- seq(0, 10, 0.25)
 
 rmses_b_iug <- sapply(lambdas3, function(l){
   
@@ -337,7 +334,7 @@ b_g_reg <- train_set %>%
 
 # Choosing the penalty term for b_y
 
-lambdas4 <- seq(0, 100, 10)
+lambdas4 <- seq(300, 400, 10)
 
 rmses_b_iugy <- sapply(lambdas4, function(l){
 
@@ -428,11 +425,39 @@ results <- rbind(results, results_reg)
 
 (1 - rmse_b_iugy_reg/rmse_b_iugy) * 100
 
+rm(b_i_reg, b_u_reg, b_g_reg, b_y_reg, results_reg, lambdas1, lambdas2, lambdas3, lambdas4)
 
 
 # Evaluation of the prediction model with the validation set
 
-# Adding year of movie, of rating and the difference between them
+# Now the effects can be recalculated for the whole edx dataset
+
+mu_edx <- mean(edx$rating)
+
+b_i_edx <- edx %>% 
+  group_by(movieId) %>%
+  summarize(b_i_edx = sum(rating - mu_edx)/(n()+lambda1))
+
+b_u_edx <- edx %>% 
+  left_join(b_i_edx, by="movieId") %>%
+  group_by(userId) %>%
+  summarize(b_u_edx = sum(rating - b_i_edx - mu_edx)/(n()+lambda2))
+
+b_g_edx <- edx %>% 
+  left_join(b_i_edx, by = "movieId") %>%
+  left_join(b_u_edx, by = "userId") %>%
+  group_by(genres) %>%
+  summarize(b_g_edx = sum(rating - b_i_edx - b_u_edx - mu_edx)/(n()+lambda3))
+
+b_y_edx <- edx %>% 
+  left_join(b_i_edx, by = "movieId") %>%
+  left_join(b_u_edx, by = "userId") %>%
+  left_join(b_g_edx, by = "genres") %>%
+  group_by(year_diff) %>%
+  summarize(b_y_edx = sum(rating - b_i_edx - b_u_edx - b_g_edx - mu_edx)/(n()+lambda4))
+
+
+# Adding year of movie, year of rating and the difference between them to the validation set
 
 validation <- validation %>%
   mutate(year_m = str_extract(title, "\\(\\d{4}\\)")) %>%
@@ -441,28 +466,18 @@ validation <- validation %>%
          year_r = year(as.POSIXct(timestamp, origin="1970-01-01")),
          year_diff = year_r - year_m)
 
+
 # Evaluation
 
 predicted_ratings_val <-  validation %>% 
-  left_join(b_i_reg, by = "movieId") %>%
-  left_join(b_u_reg, by = "userId") %>%
-  left_join(b_g_reg, by = "genres") %>%
-  left_join(b_y_reg, by = "year_diff") %>%
-  mutate(pred = mu + b_i_reg + b_u_reg + b_g_reg + b_y_reg) %>%
+  left_join(b_i_edx, by = "movieId") %>%
+  left_join(b_u_edx, by = "userId") %>%
+  left_join(b_g_edx, by = "genres") %>%
+  left_join(b_y_edx, by = "year_diff") %>%
+  mutate(pred = mu_edx + b_i_edx + b_u_edx + b_g_edx + b_y_edx) %>%
   pull(pred)
 
-RMSE(validation$rating, predicted_ratings_val)
+predicted_ratings_val[predicted_ratings_val > 5] <- 5
+predicted_ratings_val[predicted_ratings_val < 0.5] <- 0.5
 
-
-# Genres of 3 entries are not shared by the validation and train sets and have to be excluded
-
-
-
-
-
-
-predicted_ratings_val_corr <- predicted_ratings_val
-predicted_ratings_val_corr[predicted_ratings_val_corr > 5] <- 5
-predicted_ratings_val_corr[predicted_ratings_val_corr < 0.5] <- 0.5
-
-RMSE(validation$rating, predicted_ratings_val_corr)
+rmse_val <- RMSE(validation$rating, predicted_ratings_val)
