@@ -481,3 +481,36 @@ predicted_ratings_val[predicted_ratings_val > 5] <- 5
 predicted_ratings_val[predicted_ratings_val < 0.5] <- 0.5
 
 rmse_val <- RMSE(validation$rating, predicted_ratings_val)
+
+
+#################################################
+
+
+movielens %>%
+  group_by(movieId) %>%
+  summarize(n = n()) %>%
+  filter(n < 5000) %>%
+  ggplot(aes(n)) +
+  geom_histogram(bins = 20)
+
+movielens %>%
+  group_by(userId) %>%
+  summarize(n = n()) %>%
+  filter(n < 1000) %>%
+  ggplot(aes(n)) +
+  geom_histogram(bins = 20)
+
+movielens %>%
+  group_by(movieId) %>%
+  summarize(mean_i = mean(rating), n = n()) %>%
+  filter(n > 500) %>%
+  ggplot(aes(seq(1, length(movieId)), mean_i)) +
+  geom_point()
+
+movielens %>%
+  group_by(userId) %>%
+  summarize(mean_u = mean(rating), n = n()) %>%
+  filter(n > 500) %>%
+  ggplot(aes(seq(1, length(userId)), mean_u)) +
+  geom_point()
+
