@@ -10,6 +10,19 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+<script type="text/x-mathjax-config">
+MathJax.Hub.Config({
+  TeX: { 
+      equationNumbers: { 
+            autoNumber: "all",
+            formatNumber: function (n) {return +n}
+      } 
+  }
+});
+</script>
+
+
+
 
 ## 1 Introduction
 
@@ -27,7 +40,10 @@ The recommendation system will be based on a linear model containing movie, user
 
 ## 2 Analysis and Methods
 
-In the following, the movielens dataset will be analysed in detail.
+### 2.1 Data cleaning
+
+
+
 
 The dataset contains 6 columns: user id, movie id, rating (0.5 - 5 stars), time stamp (as number of seconds after 1st January 1970), title of the movie and genre of the movie. Each row represents a rating by one user to one movie. These are the first 10 rows of the dataset:
 
@@ -36,6 +52,10 @@ library(tidyverse)
 load("movielens_s.RData")
 as_tibble(movielens_s)
 ```
+
+
+### 2.2 Creating a linear model
+
 Each movie is rated by a different number of users since some movies are more popular and others are less popular. It can be seen in the following plot.
 
 ```{r movie ratings number, echo=FALSE}
@@ -47,6 +67,143 @@ movielens %>%
   geom_bar()
 ```
 
+For movies with many ratings, the mean rating can be used as an overall rating for a movie (and is used so, e.g. by IMDB). The higher number of rating is available, the closer the mean rating is to the "true" rating. It is obvious that all movies have different "true" ratings and thus different mean ratings. This can be supported by the following plot showing mean ratings of the movies with more than 500 ratings. No pattern can be observed.
+
+```{r}
+movielens %>%
+  group_by(movieId) %>%
+  summarize(mean_i = mean(rating), n = n()) %>%
+  filter(n > 500) %>%
+  ggplot(aes(seq(1, length(movieId)), mean_i)) +
+  geom_point()
+```
+
+$$
+Y_{u,i} = \mu + \epsilon_{u,i}
+$$
+
+
+
+This fact can be used to predict a rating from a specific user. The model will include the average of all movies in the dataset plus the specific term for each movie.
+
+$$
+Y_{u,i} = \mu + b_i + \epsilon_{u,i}
+$$
+
+where $Y_{u,i}$ is the predicted rating, $\mu$ is a mean of all ratings in the data set, $b_i$ is the item (movie) effect and $\epsilon_{u,i}$ is an independent error.
+
+Analogously, similar relationships can be shown for the overall ratings of one user. Each user shows a different overall average rating. This means that some users give on average higher ratings than other users. The following plot depicts mean ratings of users with more than 500 ratings. As expected, no pattern can be observed.
+
+```{r}
+movielens %>%
+  group_by(userId) %>%
+  summarize(mean_u = mean(rating), n = n()) %>%
+  filter(n > 500) %>%
+  ggplot(aes(seq(1, length(userId)), mean_u)) +
+  geom_point()
+```
+
+Thus, another term can be included in the model - the user effect.
+
+$$
+Y_{u,i} = \mu + b_i + b_u + \epsilon_{u,i}
+$$
+where $b_u$ is the user effect.
+
+The shown approach can be implemented also to the genres of movies. This is less intuitive, but it is easy to show the some genres get higher ratings than the others.
+
+These are the top 5 rated genres:
+
+```{r}
+movielens %>%
+  group_by(genres) %>%
+  summarize(mean_g = mean(rating), n = n()) %>%
+  filter(n > 500) %>%
+  slice_max(mean_g, n = 5)
+```
+
+
+And the bottom 5 rated genres:
+
+```{r}
+movielens %>%
+  group_by(genres) %>%
+  summarize(mean_g = mean(rating), n = n()) %>%
+  filter(n > 500) %>%
+  slice_min(mean_g, n = 5)
+```
+
+Accordingly, the genre effect is also included in the model.
+
+$$
+Y_{u,i} = \mu + b_i + b_u + b_g + \epsilon_{u,i}
+$$
+where $b_g$ is the genre effect.
+
+The last bit of available information in the dataset is the year of the movie release (included in the title) and the date when the rating was given. This information itself might not be very helpful. However, according to our experience, the time __between__ the movie release and the rating date might be important. It seems that older movie being rated after many years are rated more positive. To check this hypothesis, the dataset will be first adjusted to include the new columns: movie date, rating date and the difference in years between them. Afterwards, the ratings will be plotted against the time difference for a sample of 100000 entries.
+
+```{r adding year to movielense, message=FALSE}
+library(lubridate)
+
+movielens <- movielens %>%
+  mutate(year_m = str_extract(title, "\\(\\d{4}\\)")) %>%
+  mutate(year_m = str_extract(year_m, "\\d{4}")) %>%
+  mutate(year_m = as.numeric(year_m),
+         year_r = year(as.POSIXct(timestamp, origin="1970-01-01")),
+         year_diff = year_r - year_m)
+```
+
+
+```{r plot year_diff to rating, message=FALSE}
+movielens[sample(nrow(movielens), 1000000),] %>%
+  group_by(year_diff) %>%
+  summarize(rating_mean = mean(rating)) %>%
+  ggplot(aes(year_diff, rating_mean)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+As can be seen, indeed, there is a positive correlation between the movie date and rating date difference and the movie rating. Similarly to the previous approach, this information will be included in the model via the time effect $b_y$.
+
+$$
+Y_{u,i} = \mu + b_i + b_u + b_g + b_y + \epsilon_{u,i}
+$$
+
+Now the model includes all useful information available in the dataset. But how do we calculate the effects?
+
+### 3.3 Calculation of effects
+
+We will perform the calculation of all effects step by step starting with the movie effect $b_i$. From the equation 2, the $b_i$ specific for each movie can be approximated based on the average rating of all movies and the known ratings of specific a movie.
+
+$$
+hat{b_i} = \sum_{u=1}^{n_i}(Y_{i,u} - hat{\mu})
+$$
+
+whereas terms with hats are estimated values.
+
+Knowing $b_i$ and rewriting the equation 3 the effect $b_u$ can be found as following. 
+
+$$
+hat{b_u} = \sum_{u=1}^{n_i}(Y_{i,u} - hat{\mu} - hat{b_i})
+$$
+
+In the same manner, the values of the last two effects can be found.
+
+$$
+hat{b_g} = \sum_{u=1}^{n_i}(Y_{i,u} - hat{\mu} - hat{b_i} - hat{b_u})
+hat{b_y} = \sum_{u=1}^{n_i}(Y_{i,u} - hat{\mu} - hat{b_i} - hat{b_u} - hat{b_g})
+$$
+
+
+### 3.4 Calculation of effects with regularization
+
+As shown in equations __X-X__, calculation of effects depends on averages of ratings grouped in different ways (ratings for the same movie, of the same user, of the same genre or of the same movie date and rating date difference). This means that the more ratings of one group are available, the better estimation of an effect is possible. To compensate a strong influence of low number of ratings, a penalty term is introduced into the equations of the effects.
+
+For example, for the movie effect $b_i$, the modified equation looks as following:
+
+$$
+\hat{b_i}(\lambda) = \frac{1}{\lambda + n_i}\sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu})
+$$
 
 
 

@@ -1,0 +1,32 @@
+---
+title: "Test"
+output: html_document
+---
+<script type="text/x-mathjax-config">
+MathJax.Hub.Config({
+  TeX: { 
+      equationNumbers: { 
+            autoNumber: "all",
+            formatNumber: function (n) {return +n}
+      } 
+  }
+});
+</script>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+$$
+Y_{u,i} = \mu + b_i + \epsilon_{u,i}
+$$
+
+
+
+$$
+Y_{u,i} = \mu + b_i + \epsilon_{u,i}
+$$
+
+$$
+\hat{b_i}(\lambda) = \frac{1}{\lambda + n_i}\sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu})
+$$
