@@ -3,13 +3,14 @@ title: "MovieLens  \nCreating a movie recommendation system"
 author: "Anton Ivanov"
 date: "`r format(Sys.Date())`"
 output:
-  html_document:
+  bookdown::html_document2:
     df_print: paged
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+# Script adding numeration to equations
 <script type="text/x-mathjax-config">
 MathJax.Hub.Config({
   TeX: { 
@@ -24,7 +25,7 @@ MathJax.Hub.Config({
 
 
 
-## 1 Introduction
+# Introduction
 
 In this project, we will be creating a movie recommendation system using the [10M version of the MovieLens dataset](https://grouplens.org/datasets/movielens/10m/).
 This dataset contains 10 million ratings for about 10,000 movies from 72,000 users.
@@ -32,42 +33,97 @@ This dataset contains 10 million ratings for about 10,000 movies from 72,000 use
 Recommendation systems make specific recommendations based on ratings from users to items. They are of particular importance in the modern world, since they allow companies such as online shops or streaming services to recommend users matching goods or content, providing higher profits. 
 
 The goal of the project is to predict a rating for a specific movie from a specific user, based on the available ratings.
-The used ratings is as following: one star suggests it is not a good movie, whereas five stars suggest it is an excellent movie.
+The used ratings are as following: one star suggests it is not a good movie, whereas five stars suggest it is an excellent movie.
 
 Since in the dataset only 10 million ratings are available out of potential 78 million (if every user would rate every movie), about 86% of ratings remain unknown and have to be predicted.
 
-The recommendation system will be based on a linear model containing movie, user, genre and time effects. Each effect will be considered step-by-step, using a training and test sets for evaluation of the model performance. Regularization of the effects will be then implemented to improve the performance. After final tuning of the model it will be applied to the validation set to get the final performance.
-
-## 2 Analysis and Methods
-
-### 2.1 Data cleaning
+The recommendation system will be based on a linear model containing movie, user, genre and time effects. Each effect will be considered step-by-step, using a training and test sets for evaluation of the model performance. Regularization of the effects will be then implemented to improve the performance. After final tuning of the model, it will be applied to the validation set to assess the final performance.
 
 
+# Analysis and Methods
 
+## Data preparation
 
-The dataset contains 6 columns: user id, movie id, rating (0.5 - 5 stars), time stamp (as number of seconds after 1st January 1970), title of the movie and genre of the movie. Each row represents a rating by one user to one movie. These are the first 10 rows of the dataset:
+The 10M Movielens dataset is available for a downloaded as a \*.zip file containing two \*.dat files: movies.dat and ratings.dat. The files contain information to user id, movie id, rating (0.5 - 5 stars), time stamp (as number of seconds after 1st January 1970), title of the movie with release year and genre of the movie, separated by double colons "::". The values are extracted and saved as a dataframe using the following code.
 
-```{r small dataset, message=FALSE}
+```{r dataset preparation, message=FALSE, warning=FALSE}
 library(tidyverse)
-load("movielens_s.RData")
-as_tibble(movielens_s)
+library(data.table)
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- fread(text = gsub("::", "\t", readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                 col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+
+movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(movieId),
+                                           title = as.character(title),
+                                           genres = as.character(genres))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+```
+
+In the resulting dataframe, each row represents a rating by one user to one movie. These are the first 10 rows of the dataframe:
+
+```{r 10 rows of dataset, message=FALSE}
+as_tibble(movielens)[1:10,]
 ```
 
 
-### 2.2 Creating a linear model
+## Preparation of the training, test and validation sets
 
-Each movie is rated by a different number of users since some movies are more popular and others are less popular. It can be seen in the following plot.
+For the final evaluation of the recommendation systems performance, a validation dataset containing 10% of data is created. The rest of the data is saved as a edx subset. It is ensured that the userId and movieId values in the validation set are also present in the edx set.
+
+```{r validation dataset, message=FALSE, warning=FALSE}
+library(caret)
+set.seed(1, sample.kind="Rounding")
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+```
+
+The edx dataset is used for the creation and training of the recommendation system and is split into the training set (80%) and test set (20%) for these needs. 
+
+```{r train and test sets}
+set.seed(2)
+test_index <- createDataPartition(edx$rating, times = 1, p = 0.2, list = FALSE)
+train_set <- edx[-test_index]
+test_set <- edx[test_index]
+test_set <- test_set %>% 
+  semi_join(train_set, by = "movieId") %>%
+  semi_join(train_set, by = "userId")
+```
+
+## Creating a linear model
+
+Each movie is rated by a different number of users since some movies are more popular and others are less popular. It can be seen in the following plot (movies with number of ratings less than 5000 are considered).
 
 ```{r movie ratings number, echo=FALSE}
-load("movielens.RData")
 movielens %>%
   group_by(movieId) %>%
   summarize(n = n()) %>%
-  ggplot(aes(n)) + 
-  geom_bar()
+  filter(n < 5000) %>%
+  ggplot(aes(n)) +
+  geom_histogram(bins = 20)
 ```
+The simplest model would be assuming all unknown ratings equal to the average rating of all movies. It can be presented with the following equation.
 
-For movies with many ratings, the mean rating can be used as an overall rating for a movie (and is used so, e.g. by IMDB). The higher number of rating is available, the closer the mean rating is to the "true" rating. It is obvious that all movies have different "true" ratings and thus different mean ratings. This can be supported by the following plot showing mean ratings of the movies with more than 500 ratings. No pattern can be observed.
+$$
+Y_{u,i} = \mu + \epsilon_{u,i}
+$$
+
+where $Y_{u,i}$ is the predicted rating, $\mu$ is a mean of all ratings in the data set and $\epsilon_{u,i}$ is an independent error.
+
+Of course such assumption would not result in an accurate prediction, as will be shown in Section \@ref(Results). To improve the prediction, an effet of each specific movie on its rating can be considered. It is obvious that each movie has a different "true" rating - there are objectively good and bad movies. This can be supported by the following plot showing mean ratings of the movies with more than 500 ratings. No pattern can be observed.
 
 ```{r}
 movielens %>%
@@ -78,19 +134,13 @@ movielens %>%
   geom_point()
 ```
 
-$$
-Y_{u,i} = \mu + \epsilon_{u,i}
-$$
-
-
-
-This fact can be used to predict a rating from a specific user. The model will include the average of all movies in the dataset plus the specific term for each movie.
+This fact can be used to predict ratings. The model will include the average of all movies in the dataset plus the specific term for each movie.
 
 $$
 Y_{u,i} = \mu + b_i + \epsilon_{u,i}
 $$
 
-where $Y_{u,i}$ is the predicted rating, $\mu$ is a mean of all ratings in the data set, $b_i$ is the item (movie) effect and $\epsilon_{u,i}$ is an independent error.
+where $b_i$ is the item (movie) effect.
 
 Analogously, similar relationships can be shown for the overall ratings of one user. Each user shows a different overall average rating. This means that some users give on average higher ratings than other users. The following plot depicts mean ratings of users with more than 500 ratings. As expected, no pattern can be observed.
 
@@ -110,7 +160,7 @@ Y_{u,i} = \mu + b_i + b_u + \epsilon_{u,i}
 $$
 where $b_u$ is the user effect.
 
-The shown approach can be implemented also to the genres of movies. This is less intuitive, but it is easy to show the some genres get higher ratings than the others.
+The shown approach can be implemented also to the genres of movies. This is less intuitive, but it is easy to show the some genres get on average higher ratings than the others.
 
 These are the top 5 rated genres:
 
@@ -171,12 +221,12 @@ $$
 
 Now the model includes all useful information available in the dataset. But how do we calculate the effects?
 
-### 3.3 Calculation of effects
+## Calculation of effects
 
 We will perform the calculation of all effects step by step starting with the movie effect $b_i$. From the equation 2, the $b_i$ specific for each movie can be approximated based on the average rating of all movies and the known ratings of specific a movie.
 
 $$
-hat{b_i} = \sum_{u=1}^{n_i}(Y_{i,u} - hat{\mu})
+\hat{b_i} = \sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu})
 $$
 
 whereas terms with hats are estimated values.
@@ -184,20 +234,22 @@ whereas terms with hats are estimated values.
 Knowing $b_i$ and rewriting the equation 3 the effect $b_u$ can be found as following. 
 
 $$
-hat{b_u} = \sum_{u=1}^{n_i}(Y_{i,u} - hat{\mu} - hat{b_i})
+\hat{b_u} = \sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu} - \hat{b_i})
 $$
 
 In the same manner, the values of the last two effects can be found.
 
 $$
-hat{b_g} = \sum_{u=1}^{n_i}(Y_{i,u} - hat{\mu} - hat{b_i} - hat{b_u})
-hat{b_y} = \sum_{u=1}^{n_i}(Y_{i,u} - hat{\mu} - hat{b_i} - hat{b_u} - hat{b_g})
+\hat{b_g} = \sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu} - \hat{b_i} - \hat{b_u})
+$$
+$$
+\hat{b_y} = \sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu} - \hat{b_i} - \hat{b_u} - \hat{b_g})
 $$
 
 
-### 3.4 Calculation of effects with regularization
+## Calculation of effects with regularization
 
-As shown in equations __X-X__, calculation of effects depends on averages of ratings grouped in different ways (ratings for the same movie, of the same user, of the same genre or of the same movie date and rating date difference). This means that the more ratings of one group are available, the better estimation of an effect is possible. To compensate a strong influence of low number of ratings, a penalty term is introduced into the equations of the effects.
+As shown in equations __X-X__, calculation of effects depends on averages of ratings grouped in different ways (ratings for the same movie, of the same user, of the same genre or of the same movie date and rating date difference). This means that the more ratings of one group are available, the better estimation of an effect is possible. To compensate a strong influence of low number of ratings, a penalty term $\lambda$ is introduced into the equations for the effects. Penalizing large estimates that are formed using small sample sizes is the concept of **regularization**.
 
 For example, for the movie effect $b_i$, the modified equation looks as following:
 
@@ -205,30 +257,34 @@ $$
 \hat{b_i}(\lambda) = \frac{1}{\lambda + n_i}\sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu})
 $$
 
+As can be seen, when the sample size $n_i$ is large giving a stable estimate of $\hat{b_i}$, the penalty term $\lambda$ is ignored and $n_i + \lambda \approx n_i$. By a small sample size $\lambda$ becomes dominant and $\hat{b_i}(\lambda)§ is shrunken towards 0.
+
+In a similar way, penalty terms will be added to each effect. Optimal penalty terms will be defined by trying different values and comparing their influence on the performance of the prediction. 
+
+## Loss function
+
+The performance of the prediction system will be measured by the typical error loss - the residual mean squared error (RMSE) on a test set.
+
+$$
+RMSE = \sqrt{\frac{1}{N}\sum_{u,i}(\hat{y}_{u,i}-y_{u,i})^2}
+$$
+
+where $y_{u,i}$ is an actual rating of user __u__ for movie __i__, $\hat{y}_{u,i}$ is the corresponding predicted value and __N__ is  the number of user/movie combinations.
+
+The function that will compute the RMSE for vectors of ratings and their corresponding predictors:
+
+```{r RMSE}
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```
+
+
+
+# Results {# Results}
 
 
 
 
 
-
-The data is split into two subsets, whereas 10% of it are used for the validation of the recommendation system and 90% are used for creation of the system.
-
-Code
-
-
-The resulting subset with 90% of data is split again into the training set (80%) and test set (20%).
-
-Code
-
-
-
-
-
-
-## 3 Results
-
-
-
-
-
-## 4 Conclusion
+# Conclusion
