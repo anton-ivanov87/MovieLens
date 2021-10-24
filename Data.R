@@ -427,8 +427,9 @@ results <- rbind(results, results_reg)
 
 rm(b_i_reg, b_u_reg, b_g_reg, b_y_reg, results_reg, lambdas1, lambdas2, lambdas3, lambdas4)
 
-
+############################################################
 # Evaluation of the prediction model with the validation set
+############################################################
 
 # Now the effects can be recalculated for the whole edx dataset
 
@@ -466,8 +467,7 @@ validation <- validation %>%
          year_r = year(as.POSIXct(timestamp, origin="1970-01-01")),
          year_diff = year_r - year_m)
 
-
-# Evaluation
+# Final evaluation
 
 predicted_ratings_val <-  validation %>% 
   left_join(b_i_edx, by = "movieId") %>%
@@ -482,63 +482,3 @@ predicted_ratings_val[predicted_ratings_val < 0.5] <- 0.5
 
 rmse_val <- RMSE(validation$rating, predicted_ratings_val)
 
-
-#################################################
-
-
-movielens %>%
-  group_by(movieId) %>%
-  summarize(n = n()) %>%
-  filter(n < 5000) %>%
-  ggplot(aes(n)) +
-  geom_histogram(bins = 20)
-
-movielens %>%
-  group_by(userId) %>%
-  summarize(n = n()) %>%
-  filter(n < 1000) %>%
-  ggplot(aes(n)) +
-  geom_histogram(bins = 20)
-
-movielens %>%
-  group_by(movieId) %>%
-  summarize(mean_i = mean(rating), n = n()) %>%
-  filter(n > 500) %>%
-  ggplot(aes(seq(1, length(movieId)), mean_i)) +
-  geom_point()
-
-movielens %>%
-  group_by(userId) %>%
-  summarize(mean_u = mean(rating), n = n()) %>%
-  filter(n > 500) %>%
-  ggplot(aes(seq(1, length(userId)), mean_u)) +
-  geom_point()
-
-movielens %>%
-  group_by(genres) %>%
-  summarize(mean_g = mean(rating), n = n()) %>%
-  filter(n > 500) %>%
-  slice_max(mean_g, n = 5)
-
-movielens %>%
-  group_by(genres) %>%
-  summarize(mean_g = mean(rating), n = n()) %>%
-  filter(n > 500) %>%
-  slice_min(mean_g, n = 5)
-
-library(lubridate)
-
-movielens <- movielens %>%
-  mutate(year_m = str_extract(title, "\\(\\d{4}\\)")) %>%
-  mutate(year_m = str_extract(year_m, "\\d{4}")) %>%
-  mutate(year_m = as.numeric(year_m),
-         year_r = year(as.POSIXct(timestamp, origin="1970-01-01")),
-         year_diff = year_r - year_m)
-
-set.seed(4)
-movielens[sample(nrow(movielens), 1000000),] %>%
-  group_by(year_diff) %>%
-  summarize(rating_mean = mean(rating)) %>%
-  ggplot(aes(year_diff, rating_mean)) +
-  geom_point() +
-  geom_smooth(method = "lm")

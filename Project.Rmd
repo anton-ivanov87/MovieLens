@@ -1,16 +1,13 @@
 ---
-title: "MovieLens  \nCreating a movie recommendation system"
+title: "MovieLens project: Creating a movie recommendation system"
 author: "Anton Ivanov"
 date: "`r format(Sys.Date())`"
-output:
-  bookdown::html_document2:
-    df_print: paged
+output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-# Script adding numeration to equations
 <script type="text/x-mathjax-config">
 MathJax.Hub.Config({
   TeX: { 
@@ -25,7 +22,7 @@ MathJax.Hub.Config({
 
 
 
-# Introduction
+# 1 Introduction
 
 In this project, we will be creating a movie recommendation system using the [10M version of the MovieLens dataset](https://grouplens.org/datasets/movielens/10m/).
 This dataset contains 10 million ratings for about 10,000 movies from 72,000 users.
@@ -40,11 +37,20 @@ Since in the dataset only 10 million ratings are available out of potential 78 m
 The recommendation system will be based on a linear model containing movie, user, genre and time effects. Each effect will be considered step-by-step, using a training and test sets for evaluation of the model performance. Regularization of the effects will be then implemented to improve the performance. After final tuning of the model, it will be applied to the validation set to assess the final performance.
 
 
-# Analysis and Methods
+# 2 Analysis and Methods
 
-## Data preparation
+## 2.1 Data preparation
 
-The 10M Movielens dataset is available for a downloaded as a \*.zip file containing two \*.dat files: movies.dat and ratings.dat. The files contain information to user id, movie id, rating (0.5 - 5 stars), time stamp (as number of seconds after 1st January 1970), title of the movie with release year and genre of the movie, separated by double colons "::". The values are extracted and saved as a dataframe using the following code.
+The 10M Movielens dataset is available for a downloaded as a \*.zip file containing two \*.dat files: movies.dat and ratings.dat. The files contain data of the following features:
+
+* user id: an entry number specific for each user;
+* movie id: an entry number specific for each movie;
+* rating: movie ratings in the range from 0.5 to 5 stars with the step 0.5 stars;
+* time stamp: an integer presented as number of seconds after 1st January 1970;
+* title of the movie with release year;
+* genre of the movie.
+
+The features are separated by double colons "::". The values are extracted and saved as a dataframe using the following code.
 
 ```{r dataset preparation, message=FALSE, warning=FALSE}
 library(tidyverse)
@@ -67,14 +73,14 @@ movielens <- left_join(ratings, movies, by = "movieId")
 
 In the resulting dataframe, each row represents a rating by one user to one movie. These are the first 10 rows of the dataframe:
 
-```{r 10 rows of dataset, message=FALSE}
-as_tibble(movielens)[1:10,]
+```{r ten rows of dataset, message=FALSE}
+as_tibble(movielens)
 ```
 
 
-## Preparation of the training, test and validation sets
+## 2.2 Preparation of the training, test and validation sets
 
-For the final evaluation of the recommendation systems performance, a validation dataset containing 10% of data is created. The rest of the data is saved as a edx subset. It is ensured that the userId and movieId values in the validation set are also present in the edx set.
+For the final evaluation of the recommendation system's performance, a validation dataset containing 10% of data is created. The rest of the data is saved as a edx subset. It is ensured that the userId and movieId values in the validation set are also present in the edx set.
 
 ```{r validation dataset, message=FALSE, warning=FALSE}
 library(caret)
@@ -103,69 +109,63 @@ test_set <- test_set %>%
   semi_join(train_set, by = "userId")
 ```
 
-## Creating a linear model
+## 2.3 Creating a linear model
 
-Each movie is rated by a different number of users since some movies are more popular and others are less popular. It can be seen in the following plot (movies with number of ratings less than 5000 are considered).
+The linear model will be built based on observations made for the edx dataset. We will start with the simplest model and will gradually increase its complexity.
 
-```{r movie ratings number, echo=FALSE, out.height=70%}
-movielens %>%
-  group_by(movieId) %>%
-  summarize(n = n()) %>%
-  filter(n < 5000) %>%
-  ggplot(aes(n)) +
-  geom_histogram(bins = 20)
-```
-The simplest model would be assuming all unknown ratings equal to the average rating of all movies. It can be presented with the following equation.
+The simplest model would be just assuming all unknown ratings equal to the average rating of all movies. It can be presented with the following equation.
 
-$$
+\begin{equation}
 Y_{u,i} = \mu + \epsilon_{u,i}
-$$
+\end{equation}
 
-where $Y_{u,i}$ is the predicted rating, $\mu$ is a mean of all ratings in the data set and $\epsilon_{u,i}$ is an independent error.
+where $Y_{u,i}$ is the predicted rating, $\mu$ is a mean of all ratings in the data set and $\epsilon_{u,i}$ is an independent error (it is added as a reminder that the prediction is not perfect).
 
-Of course such assumption would not result in an accurate prediction, as will be shown in Section \@ref(Results). To improve the prediction, an effet of each specific movie on its rating can be considered. It is obvious that each movie has a different "true" rating - there are objectively good and bad movies. This can be supported by the following plot showing mean ratings of the movies with more than 500 ratings. No pattern can be observed.
+Of course such assumption would not result in an accurate prediction, as will be shown in the Results Chapter. To improve the prediction, an effect of each specific movie on its rating will be considered. It is obvious that each movie has a different "true" rating --- there are better and worse movies. This can be supported by the following plot showing mean ratings of the movies with more than 500 ratings. No pattern can be observed.
 
 ```{r}
-movielens %>%
+edx %>%
   group_by(movieId) %>%
-  summarize(mean_i = mean(rating), n = n()) %>%
+  summarize(mean = mean(rating), n = n()) %>%
   filter(n > 500) %>%
-  ggplot(aes(seq(1, length(movieId)), mean_i)) +
-  geom_point()
+  ggplot(aes(seq(1, length(movieId)), mean)) +
+  geom_point() + 
+  xlab("entry")
 ```
 
-This fact can be used to predict ratings. The model will include the average of all movies in the dataset plus the specific term for each movie.
+This fact will be used to predict ratings. The model will include the average of **all** movies in the dataset plus the term **specific** for each movie:
 
-$$
+\begin{equation}
 Y_{u,i} = \mu + b_i + \epsilon_{u,i}
-$$
+\end{equation}
 
 where $b_i$ is the item (movie) effect.
 
-Analogously, similar relationships can be shown for the overall ratings of one user. Each user shows a different overall average rating. This means that some users give on average higher ratings than other users. The following plot depicts mean ratings of users with more than 500 ratings. As expected, no pattern can be observed.
+Analogously, similar relationships can be shown for the overall ratings of one user. Each user shows a different overall average rating. This means that on average some users give higher ratings than other users. The following plot depicts mean ratings of users with more than 500 ratings. As expected, no pattern can be observed.
 
 ```{r}
-movielens %>%
+edx %>%
   group_by(userId) %>%
-  summarize(mean_u = mean(rating), n = n()) %>%
+  summarize(mean = mean(rating), n = n()) %>%
   filter(n > 500) %>%
-  ggplot(aes(seq(1, length(userId)), mean_u)) +
-  geom_point()
+  ggplot(aes(seq(1, length(userId)), mean)) +
+  geom_point() + 
+  xlab("entry")
 ```
 
-Thus, another term can be included in the model - the user effect.
+Thus, another term can be included in the model --- the user effect:
 
-$$
+\begin{equation}
 Y_{u,i} = \mu + b_i + b_u + \epsilon_{u,i}
-$$
+\end{equation}
 where $b_u$ is the user effect.
 
-The shown approach can be implemented also to the genres of movies. This is less intuitive, but it is easy to show the some genres get on average higher ratings than the others.
+The shown approach can also be implemented to the genres of movies. This is less intuitive, but it is easy to show that on average some genres get  higher ratings than others.
 
 These are the top 5 rated genres:
 
 ```{r}
-movielens %>%
+edx %>%
   group_by(genres) %>%
   summarize(mean_g = mean(rating), n = n()) %>%
   filter(n > 500) %>%
@@ -176,7 +176,7 @@ movielens %>%
 And the bottom 5 rated genres:
 
 ```{r}
-movielens %>%
+edx %>%
   group_by(genres) %>%
   summarize(mean_g = mean(rating), n = n()) %>%
   filter(n > 500) %>%
@@ -185,17 +185,17 @@ movielens %>%
 
 Accordingly, the genre effect is also included in the model.
 
-$$
+\begin{equation}
 Y_{u,i} = \mu + b_i + b_u + b_g + \epsilon_{u,i}
-$$
+\end{equation}
 where $b_g$ is the genre effect.
 
-The last bit of available information in the dataset is the year of the movie release (included in the title) and the date when the rating was given. This information itself might not be very helpful. However, according to our experience, the time __between__ the movie release and the rating date might be important. It seems that older movie being rated after many years are rated more positive. To check this hypothesis, the dataset will be first adjusted to include the new columns: movie date, rating date and the difference in years between them. Afterwards, the ratings will be plotted against the time difference for a sample of 100000 entries.
+The last bit of available information in the dataset is the year of the movie release (included in the title) and the date when the rating was given. This information itself might not be very helpful. However, according to our experience, the time __between__ the movie release and the rating date (_year difference_) might be important. It seems that older movie being rated after many years are rated more positive. To check this hypothesis, the dataset will first be adjusted to include the new columns: movie date, rating date and the difference in years between them. Afterwards, the ratings will be plotted against the time difference for a sample of 1,000,000 entries. 
 
 ```{r adding year to movielense, message=FALSE}
 library(lubridate)
 
-movielens <- movielens %>%
+edx <- edx %>%
   mutate(year_m = str_extract(title, "\\(\\d{4}\\)")) %>%
   mutate(year_m = str_extract(year_m, "\\d{4}")) %>%
   mutate(year_m = as.numeric(year_m),
@@ -205,7 +205,7 @@ movielens <- movielens %>%
 
 
 ```{r plot year_diff to rating, message=FALSE}
-movielens[sample(nrow(movielens), 1000000),] %>%
+edx[sample(nrow(edx), 1000000),] %>%
   group_by(year_diff) %>%
   summarize(rating_mean = mean(rating)) %>%
   ggplot(aes(year_diff, rating_mean)) +
@@ -213,61 +213,62 @@ movielens[sample(nrow(movielens), 1000000),] %>%
   geom_smooth(method = "lm")
 ```
 
-As can be seen, indeed, there is a positive correlation between the movie date and rating date difference and the movie rating. Similarly to the previous approach, this information will be included in the model via the time effect $b_y$.
+As can be seen, indeed, there is a positive correlation between the movie date and the _year difference_. Similarly to the previous approach, this information will be included in the model via the time effect $b_y$:
 
-$$
+\begin{equation}
 Y_{u,i} = \mu + b_i + b_u + b_g + b_y + \epsilon_{u,i}
-$$
+\end{equation}
 
-Now the model includes all useful information available in the dataset. But how do we calculate the effects?
+Now the model includes all useful information available in the dataset presented through the movie, user, genre and time effects. But how do we calculate the effects?
 
-## Calculation of effects
+## 2.4 Calculation of effects
 
-We will perform the calculation of all effects step by step starting with the movie effect $b_i$. From the equation 2, the $b_i$ specific for each movie can be approximated based on the average rating of all movies and the known ratings of specific a movie.
+We will perform the calculation of all effects step by step starting with the movie effect $b_i$. From the equation 2, the $b_i$ specific for each movie can be approximated based on the average rating of all movies $\mu$ and the **known** ratings of a movie.
 
-$$
+\begin{equation}
 \hat{b_i} = \sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu})
-$$
+\end{equation}
 
 whereas terms with hats are estimated values.
 
 Knowing $b_i$ and rewriting the equation 3 the effect $b_u$ can be found as following. 
 
-$$
+\begin{equation}
 \hat{b_u} = \sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu} - \hat{b_i})
-$$
+\end{equation}
 
-In the same manner, the values of the last two effects can be found.
+In the same manner, the values of the last two effects can be found based on equations 4-5.
 
-$$
+\begin{equation}
 \hat{b_g} = \sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu} - \hat{b_i} - \hat{b_u})
-$$
-$$
+\end{equation}
+
+\begin{equation}
 \hat{b_y} = \sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu} - \hat{b_i} - \hat{b_u} - \hat{b_g})
-$$
+\end{equation}
 
 
-## Calculation of effects with regularization
+## 2.5 Calculation of effects with regularization
 
-As shown in equations __X-X__, calculation of effects depends on averages of ratings grouped in different ways (ratings for the same movie, of the same user, of the same genre or of the same movie date and rating date difference). This means that the more ratings of one group are available, the better estimation of an effect is possible. To compensate a strong influence of low number of ratings, a penalty term $\lambda$ is introduced into the equations for the effects. Penalizing large estimates that are formed using small sample sizes is the concept of **regularization**.
+As shown in equations 6-9, calculation of effects depends on averages of ratings grouped in different ways (ratings for the same movie, of the same user, of the same genre or of the same movie date and rating date difference). This means that the more ratings of one group are available, the better estimation of an effect is possible. To compensate a strong influence of low number of ratings, a penalty term $\lambda$ is introduced into the equations for the effects. Penalizing large estimates that are formed using small sample sizes is the concept of **regularization**.
 
 For example, for the movie effect $b_i$, the modified equation looks as following:
 
-$$
+\begin{equation}
 \hat{b_i}(\lambda) = \frac{1}{\lambda + n_i}\sum_{u=1}^{n_i}(Y_{i,u} - \hat{\mu})
-$$
+\end{equation}
 
-As can be seen, when the sample size $n_i$ is large giving a stable estimate of $\hat{b_i}$, the penalty term $\lambda$ is ignored and $n_i + \lambda \approx n_i$. By a small sample size $\lambda$ becomes dominant and $\hat{b_i}(\lambda)§ is shrunken towards 0.
+As can be seen, when the sample size $n_i$ is large giving a stable estimate of $\hat{b_i}$, the penalty term $\lambda$ is ignored and $n_i + \lambda \approx n_i$. By a small sample size $\lambda$ becomes dominant and $\hat{b_i}(\lambda)$ is shrunken towards 0.
 
-In a similar way, penalty terms will be added to each effect. Optimal penalty terms will be defined by trying different values and comparing their influence on the performance of the prediction. 
+In a similar way, penalty terms will be added to each effect. Optimal penalty terms will be defined by trying out different values and comparing their influence on the performance of the prediction. 
 
-## Loss function
+## 2.6 Loss function
 
-The performance of the prediction system will be measured by the typical error loss - the residual mean squared error (RMSE) on a test set.
+The performance of the prediction system will be measured by the typical error loss --- the residual mean squared error (RMSE) on a test set:
 
-$$
+\begin{equation}
 RMSE = \sqrt{\frac{1}{N}\sum_{u,i}(\hat{y}_{u,i}-y_{u,i})^2}
-$$
+\end{equation}
 
 where $y_{u,i}$ is an actual rating of user __u__ for movie __i__, $\hat{y}_{u,i}$ is the corresponding predicted value and __N__ is  the number of user/movie combinations.
 
@@ -280,11 +281,11 @@ RMSE <- function(true_ratings, predicted_ratings){
 ```
 
 
-# Results
+# 3 Results
 
 In the following, the described model will be built and the effects and regularization penalty terms will be calculated based on the train and test sets. The final performance of the recommendation system will be evaluated with the validation set.
 
-## Model without regularization
+## 3.1 Model without regularization
 
 First, we will try just to randomly guess the ratings and show the corresponding RMSE:
 
@@ -294,14 +295,14 @@ pred_random <- sample(seq(0.5, 5, by = 0.5), nrow(test_set), replace = TRUE)
 rmse_random <- RMSE(test_set$rating, pred_random)
 rmse_random
 ```
-Not surprisingly, the RMSE is quite high. Just applying our simplest model --- assuming all ratings to be the average of the known ratings --- already improves the performance.
+Not surprisingly, the RMSE is quite high. Just applying our simplest model --- assuming all ratings to be the average of the known ratings --- already improves the performance:
 
 ```{r just average}
 mu <- mean(train_set$rating)
 rmse_mean <- RMSE(test_set$rating, mu)
 rmse_mean
 ```
-Now we will add the first effect (movie effect) to the model. The effect is calculated according to the equation 6.
+Now we will add the first effect (movie effect) to the model. The effect is calculated according to the equation 6:
 
 ```{r movie effect}
 b_i <- train_set %>% 
@@ -316,7 +317,7 @@ predicted_ratings_b_i <- test_set %>%
 rmse_b_i <- RMSE(test_set$rating, predicted_ratings_b_i)
 rmse_b_i
 ```
-Addition of the movie effect results in the improvement of the prediction on the test set of 11%. Implementation of the other effects in the model and their influence on the model performance are shown in the following.
+The addition of the movie effect results in the improvement of the prediction on the test set of 11%. This is a considerable improvement of the performance. The implementation of the other effects in the model and their influence on the model performance are shown in the following.
 
 User effect:
 
@@ -355,7 +356,7 @@ predicted_ratings_b_iug <-
 rmse_b_iug <- RMSE(test_set$rating, predicted_ratings_b_iug)
 rmse_b_iug
 ```
-To calculate and apply the time effect, the difference between the release date of a movie and the review date in years will be added to data sets.
+To calculate and apply the time effect, the _year difference_ will be added to the data sets.
 
 ```{r add time diff}
 train_set <- train_set %>%
@@ -395,7 +396,7 @@ predicted_ratings_b_iugy <-
 rmse_b_iugy <- RMSE(test_set$rating, predicted_ratings_b_iugy)
 rmse_b_iugy
 ```
-All data is summarized in a tibble with the following code:
+All data are summarized in a table with the following code:
 
 ```{r summary tibble}
 results <- tibble(method = c("Random", 
@@ -413,14 +414,14 @@ results <- tibble(method = c("Random",
 
 results <- results %>%
   mutate(improvement = (1 - RMSE/lag(RMSE))*100)
-results
+knitr::kable(results)
 ```
-An improvement of RMSE is observed for addition of each effect, though in a smaller extent for the last two effects.
+An improvement of RMSE is observed for the addition of each effect, though in a smaller extent for the last two effects.
 
 
-## Model with regularization
+## 3.2 Model with regularization
 
-In order to decrease RMSE even further, regularization of the effects will be introduced according to the equations 10--13. Penalty terms will be defined step-by-step for all effects.
+In order to decrease RMSE even further, regularization of the effects will be introduced according to the equation 10. Penalty terms will be defined step-by-step for all effects.
 
 Movie effect with regularization:
 
@@ -442,7 +443,7 @@ rmses_b_i <- sapply(lambdas1, function(l){
 })
 ```
 
-The influence of the penalty term value on RMSE can be shown in the following plot.
+The influence of the penalty term value on RMSE can be shown in the following plot:
 
 ```{r echo=FALSE}
 data.frame(lambda = lambdas1, RMSE = rmses_b_i) %>%
@@ -450,7 +451,7 @@ data.frame(lambda = lambdas1, RMSE = rmses_b_i) %>%
   geom_point()
 ```
 
-The best __\lambda__ is defined and the lowest RMSE is shown. A vector of movie effects based on the best __\lambda__ is saved for the final evaluation.
+The best $\lambda$ is defined and the lowest RMSE is shown. A vector of movie effects based on the best $\lambda$ is saved for the final evaluation.
 
 ```{r lambda1}
 lambda1 <- lambdas1[which.min(rmses_b_i)]
@@ -573,7 +574,7 @@ rmses_b_iugy <- sapply(lambdas4, function(l){
 })
 ```
 
-Since the parameter year difference presents a relative small number of groups, the sample number is each group is very high. Therefore, the regularization for this parameter is less important and the value of __\lambda__ is relative high.
+Since the parameter _year difference_ presents a relatively small number of groups, the sample number of each group is very high. Therefore, the regularization for this parameter is less important and the value of $\lambda$ is relative high.
 
 ```{r}
 data.frame(lambda = lambdas4, RMSE = rmses_b_iugy) %>%
@@ -601,9 +602,22 @@ Improvement achieved by the introduction of the regularization is shown below (a
 (1 - rmse_b_iugy_reg/rmse_b_iugy) * 100
 ```
 
-## Fine tuning
+Now predicted ratings based on all effects can be calculated and used for the fine tunung.
 
-Finally, some small corrections can be applied to further improve the predictions. Since the model calculates ratings as a sum of several parameters, the ratings lie ipso facto not in the range between 0.5 and 5.0 stars. The actual range is: `r range(predicted_ratings_reg)`. To correct this the ratings below 0.5 will be substituted with 0.5 and the ratings above 5.0 with 5.0 with the following code.
+```{r predicted ratings reg}
+predicted_ratings_reg <-  test_set %>% 
+  left_join(b_i_reg, by = "movieId") %>%
+  left_join(b_u_reg, by = "userId") %>%
+  left_join(b_g_reg, by = "genres") %>%
+  left_join(b_y_reg, by = "year_diff") %>%
+  mutate(pred = mu + b_i_reg + b_u_reg + b_g_reg + b_y_reg) %>%
+  pull(pred)
+```
+
+
+## 3.3 Fine tuning
+
+Finally, some small corrections can be applied to further improve the predictions. Since the model calculates ratings as a sum of several parameters, the ratings lie ipso facto not in the range between 0.5 and 5.0 stars. The range for the current calculation is: `r range(predicted_ratings_reg)`. To correct this, the ratings below 0.5 will be substituted with 0.5 and the ratings above 5.0 with 5.0 with the following code.
 
 ```{r correction}
 predicted_ratings_reg_corr <- predicted_ratings_reg
@@ -613,14 +627,16 @@ predicted_ratings_reg_corr[predicted_ratings_reg_corr < 0.5] <- 0.5
 rmse_b_iugy_reg_final <- RMSE(test_set$rating, predicted_ratings_reg_corr)
 rmse_b_iugy_reg_final
 ```
-Moreover, since the actual ratings are presented between 0.5 and 5.0 stars with the step 0.5, one can assume that rounding the predicted ratings to the nearest .5 or .0 values could also result in an improvement. However, this approach shows contrariwise a considerable increase of RMSE and will not be applied in the final fine tuning.
+As can be seen, this correction results in an improved RMSE.
+
+Moreover, since the actual ratings are presented between 0.5 and 5.0 stars with the step 0.5, one can assume that rounding the predicted ratings to the nearest .5 or .0 values could also result in an improvement. However, this approach shows a considerable increase of RMSE and will not be applied in the final fine tuning.
 
 ```{r rounding}
 predicted_ratings_reg_corr2 <- plyr::round_any(predicted_ratings_reg_corr, 0.5)
 
 RMSE(test_set$rating, predicted_ratings_reg_corr2)
 ```
-All new results are added to the summary tibble.
+All new results including the effect regularization and the fine tuning are added to the summary table.
 
 ```{r summary with reg, rows.print = 11}
 results_reg <- tibble(method = c("Movie Effect Reg", 
@@ -638,14 +654,14 @@ results_reg <- results_reg %>%
   mutate(improvement = (1 - RMSE/lag(RMSE))*100)
   
 results <- rbind(results, results_reg)
-print(results)
+knitr::kable(results)
 ```
 
-## Model evaluation
+## 3.4 Model evaluation
 
 Now everything is ready to apply the developed model to the validation set and to find out the final performance of the recommendation system.
 
-The validation set is first amended with the difference between the release date of a movie and the review date in years necessary for the calculation of the time effect.
+First, the validation set is amended with the _year difference_ necessary for the calculation of the time effect.
 
 ```{r validation set diff_year}
 validation <- validation %>%
@@ -659,13 +675,6 @@ validation <- validation %>%
 Then the effects are recalculated using the whole edx set.
 
 ```{r effect calc edx}
-edx <- edx %>%
-  mutate (year_m = str_extract(title, "\\(\\d{4}\\)")) %>%
-  mutate(year_m = str_extract(year_m, "\\d{4}")) %>%
-  mutate(year_m = as.numeric(year_m),
-         year_r = year(as.POSIXct(timestamp, origin="1970-01-01")),
-         year_diff = year_r - year_m)
-
 mu_edx <- mean(edx$rating)
 
 b_i_edx <- edx %>% 
@@ -711,6 +720,10 @@ rmse_val
 The RMSE `r rmse_val` of the prediction on the validation set is close to that of the test set and even smaller. This supports the validity of the developed model and of the applied approach.
 
 
-# Conclusion
+# 4 Conclusion
 
+In this project, we have created a recommendation system for prediction of movie ratings. Information used for predictions is as following: user id, movie id, known ratings, year of rating, release year and genre of the movie. 
 
+The recommendation system is based on a linear model including movie, user, genre and time effects. The influence of the effects on the predicted rating is controlled via regularization. The effects were defined using the edx set, the penalty terms were defined using the training and test sets. The final evaluation was performed using the separate validation set.
+
+Recommendation system provided prediction with the performance defined by RMSE: `r rmse_val`. 
