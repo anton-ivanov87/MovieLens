@@ -482,3 +482,98 @@ predicted_ratings_val[predicted_ratings_val < 0.5] <- 0.5
 
 rmse_val <- RMSE(validation$rating, predicted_ratings_val)
 
+#####################################################
+# Calculation for the new user via a function
+####################################################
+
+recommend <- function(user_table, output = 10, year = 2021){
+  
+  # The function takes a name of the user excel table with partly rated movies, number of returned rows and year of rating and returns
+  # rmse of the prediction for the new user and a dataframe with recommended movies arranged by predicted rating
+  
+  library(tidyverse)
+  library(xlsx)
+  
+  user_df_raw <- read.xlsx(user_table, 1) # read the xlsx user table
+  
+  movielens_g_y <- movielens %>% # extract genre and year columns for all movies from movielens dataset
+    select(movieId, genres, year_m) %>%
+    group_by(movieId) %>%
+    summarize(genres = first(genres), year_m = first(year_m))
+  
+  user_df <- user_df_raw %>% # prepare dataframe with user ratings to include all needed information
+    mutate(userId = max(movielens$userId)+1, rating = as.numeric(rating), year_r = year) %>%
+    left_join(movielens_g_y, by = "movieId") %>%
+    mutate(year_diff = year_r - year_m)
+  
+  user_df_rated <- user_df %>% # user dataframe including only rated movies
+    filter(!is.na(rating))
+  
+  movielens_plus <- rbind(movielens, user_df_rated, fill = TRUE) # add new user ratings to movielens dataset
+  
+  # Update model parameters (effects)
+  
+  lambda1 <- 2 # lambdas stay unchanged
+  lambda2 <- 5.25
+  lambda3 <- 4
+  lambda4 <- 340
+  
+  mu_movielens_plus <- mean(movielens_plus$rating)
+  
+  b_i_movielens_plus <- movielens_plus %>% 
+    group_by(movieId) %>%
+    summarize(b_i_movielens_plus = sum(rating - mu_movielens_plus)/(n()+lambda1))
+  
+  b_u_movielens_plus <- movielens_plus %>% 
+    left_join(b_i_movielens_plus, by="movieId") %>%
+    group_by(userId) %>%
+    summarize(b_u_movielens_plus = sum(rating - b_i_movielens_plus - mu_movielens_plus)/(n()+lambda2))
+  
+  b_g_movielens_plus <- movielens_plus %>% 
+    left_join(b_i_movielens_plus, by = "movieId") %>%
+    left_join(b_u_movielens_plus, by = "userId") %>%
+    group_by(genres) %>%
+    summarize(b_g_movielens_plus = sum(rating - b_i_movielens_plus - b_u_movielens_plus - mu_movielens_plus)/(n()+lambda3))
+  
+  b_y_movielens_plus <- movielens_plus %>% 
+    left_join(b_i_movielens_plus, by = "movieId") %>%
+    left_join(b_u_movielens_plus, by = "userId") %>%
+    left_join(b_g_movielens_plus, by = "genres") %>%
+    group_by(year_diff) %>%
+    summarize(b_y_movielens_plus = sum(rating - b_i_movielens_plus - b_u_movielens_plus - b_g_movielens_plus - mu_movielens_plus)/(n()+lambda4))
+  
+  # Updated parameters are used to make new predictions
+  
+  predicted_ratings <-  movielens_plus %>% 
+    left_join(b_i_movielens_plus, by = "movieId") %>%
+    left_join(b_u_movielens_plus, by = "userId") %>%
+    left_join(b_g_movielens_plus, by = "genres") %>%
+    left_join(b_y_movielens_plus, by = "year_diff") %>%
+    mutate(pred = mu_movielens_plus + b_i_movielens_plus + b_u_movielens_plus + b_g_movielens_plus + b_y_movielens_plus)
+  
+  predicted_ratings_user <- predicted_ratings %>% # predictions sorted out for the new user
+    filter(userId == max(movielens$userId)+1)
+  
+  rmse_new_user <- RMSE(user_df_rated$rating, predicted_ratings_user$pred) # rmse for the new user
+  
+  rec_new_user <- user_df %>% # now prediction of rating for the not rated movies is made
+    left_join(b_i_movielens_plus, by = "movieId") %>%
+    left_join(b_u_movielens_plus, by = "userId") %>%
+    left_join(b_g_movielens_plus, by = "genres") %>%
+    left_join(b_y_movielens_plus, by = "year_diff") %>%
+    mutate(pred = mu_movielens_plus + b_i_movielens_plus + b_u_movielens_plus + b_g_movielens_plus + b_y_movielens_plus)
+  
+  rec_new_user$pred[rec_new_user$pred > 5] <- 5 # fine tuning
+  rec_new_user$pred[rec_new_user$pred < 0.5] <- 0.5
+  
+  rec_ratings <- rec_new_user %>% # recommended movies are arranged by predicted rating
+    top_n(wt = pred, n = output) %>% # defined number of rows is shown
+    arrange(desc(pred)) %>%
+    select(title, rating, pred)
+  
+  result <- list(rec_ratings, rmse_new_user)
+  
+  return(result)
+}
+
+recommend("Films_rm.xlsx", output = 50, year = 2021) # checking the function
